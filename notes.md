@@ -2,7 +2,7 @@
     Cursor. Mostly used to fix syntax errors and redundant stuff like protobuf generation and some library specific code to get the hang of the library. Also, used it for some ideas on minor improvements and optimizations which were syntax specific.
 
 ## Streaming the file through TCP
-Streaming the file through TCP, I had a few ideas. First I thought that I would decode the DBN file and stream it through a websocket connection. However, I would have to decode it for every new client connection which would be inefficient. I could decode it once and put it in memory or a ring buffer and stream the content to the client, but that would not really be scalable for larger file sizes. I considered gRPC for stronger typing and performance. In the end I decided to pre‑encode the file into frame buffer batches and stream over gRPC server because it reduces the number of messages sent over the network. I was able to reach a rate of >500k msg per second with this approach. I did a quick benchmark (bench_tcp) with a batch size of 1000 messages and got:
+Streaming the file through TCP, I had a few ideas. First I thought that I would decode the DBN file and stream it through a websocket connection. However, I would have to decode it for every new client connection which would be inefficient. I could decode it once and put it in memory or a ring buffer and stream the content to the client, but that would not really be scalable for larger file sizes. I considered gRPC for stronger typing and performance. In the end I decided to pre‑encode the file into frame buffer batches using Protocol Buffers and stream over gRPC because it reduces the number of messages sent over the network (batching) while keeping serialization fast and compact. I was able to reach a rate of >500k msg per second with this approach. I did a quick benchmark (bench_tcp) with a batch size of 1000 messages and got:
 Avg Msg Rate: 551183 msg/s
 Avg Batch Rate: 563 batch/s
 Avg Throughput: 30.86 MB/s
@@ -22,6 +22,7 @@ Total Bytes: 2243649 (2.14MB)
 6. HTTP kept minimal with health and snapshot endpoints returning the latest view.
 7. Was able to get p99 around 2791 ns and average around 862 ns per message for ingestion.
 8. Tried to handle errors gracefully in storage and ingestion.
+9. spawned a separate thread to write the MBP snapshots to a file, also using simple crossbeam channel for communication.
 
 ## Time taken:
 I would say I spent roughly 7-8 hours in total. The order book concepts were not new to me and most of the implementation was available in the documentation, so adapting it took about 2 hours. For the streaming, the logic itself was simple but I did a couple of iterations on the implementation, about 3 hours. The rest went into the database writing logic, a bit of tuning, and some small cleanups.

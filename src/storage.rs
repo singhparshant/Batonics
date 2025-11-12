@@ -275,13 +275,13 @@ fn flush_copy(client: &mut Client, buffer: &mut Vec<SharedSnapshot>) -> Result<(
     for (idx, snapshot) in buffer.iter().enumerate() {
         let payload = &snapshot.payload;
 
-        // Extract best bid (use max i64 if None per your example)
+        // Extract best bid (use 0 if None)
         let (best_bid_price, best_bid_size, best_bid_count) = payload
             .bbo
             .best_bid
             .as_ref()
             .map(|b| (b.price, b.size as i32, b.count as i32))
-            .unwrap_or((i64::MAX, 0, 0));
+            .unwrap_or((0, 0, 0));
 
         // Extract best ask (use 0 if None)
         let (best_ask_price, best_ask_size, best_ask_count) = payload

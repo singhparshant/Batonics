@@ -1,5 +1,6 @@
 use std::{
     env, fs,
+    io::{BufWriter, Write},
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
@@ -17,8 +18,8 @@ use batonics::{
     order_book::Market,
     server::{ServerConfig, spawn_http_server},
     snapshot::{
-        DEFAULT_TOP_LEVELS, SharedSnapshot, SnapshotRecord, build_full_snapshot_record,
-        build_snapshot_record,
+        DEFAULT_TOP_LEVELS, SharedSnapshot, SnapshotRecord, build_snapshot_record,
+        snapshot_to_mbp_output,
     },
     storage::{StorageConfig, spawn_writer},
 };
@@ -26,6 +27,7 @@ use batonics::{
 fn main() -> Result<()> {
     let config = AppConfig::from_env()?;
     let (tx, rx) = crossbeam_channel::bounded::<SharedSnapshot>(config.queue_capacity);
+    let (mbp_tx, mbp_rx) = crossbeam_channel::bounded::<SharedSnapshot>(config.queue_capacity);
     let latest: Arc<ArcSwapOption<SnapshotRecord>> = Arc::new(ArcSwapOption::empty());
 
     let storage_handle = spawn_writer(
@@ -37,6 +39,8 @@ fn main() -> Result<()> {
         rx,
     );
 
+    let mbp_handle = spawn_mbp_writer(mbp_rx);
+
     let server_handle = spawn_http_server(
         latest.clone(),
         ServerConfig {
@@ -44,13 +48,17 @@ fn main() -> Result<()> {
         },
     );
 
-    run_ingest(&config, tx, latest.clone())?;
+    run_ingest(&config, tx, mbp_tx, latest.clone())?;
 
     // Wait for persistence to drain
     let storage_result = storage_handle
         .join()
         .expect("storage writer thread panicked");
     storage_result?;
+
+    // Wait for MBP writer to finish
+    let mbp_result = mbp_handle.join().expect("mbp writer thread panicked");
+    mbp_result?;
 
     // Keep serving snapshots until ctrl+c
     let server_result = server_handle.join().expect("server thread panicked");
@@ -62,6 +70,7 @@ fn main() -> Result<()> {
 fn run_ingest(
     config: &AppConfig,
     tx: Sender<SharedSnapshot>,
+    mbp_tx: Sender<SharedSnapshot>,
     latest: Arc<ArcSwapOption<SnapshotRecord>>,
 ) -> Result<()> {
     let start = Instant::now();
@@ -104,9 +113,46 @@ fn run_ingest(
 
             let shared = Arc::new(snapshot);
             latest.store(Some(shared.clone()));
-            if tx.send(shared).is_err() {
-                eprintln!("snapshot_queue_closed, stopping ingest");
-                break;
+
+            // Send to both storage and MBP writer threads with retry
+            let mut retries = 0;
+            loop {
+                match tx.try_send(shared.clone()) {
+                    Ok(_) => break,
+                    Err(crossbeam_channel::TrySendError::Full(_)) => {
+                        if retries < 3 {
+                            std::thread::sleep(Duration::from_millis(10 * (1 << retries)));
+                            retries += 1;
+                        } else {
+                            eprintln!("snapshot_queue full after retries, dropping snapshot");
+                            break;
+                        }
+                    }
+                    Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                        eprintln!("snapshot_queue_closed, stopping ingest");
+                        return Err(anyhow::anyhow!("storage queue disconnected"));
+                    }
+                }
+            }
+
+            retries = 0;
+            loop {
+                match mbp_tx.try_send(shared.clone()) {
+                    Ok(_) => break,
+                    Err(crossbeam_channel::TrySendError::Full(_)) => {
+                        if retries < 3 {
+                            std::thread::sleep(Duration::from_millis(10 * (1 << retries)));
+                            retries += 1;
+                        } else {
+                            eprintln!("mbp_queue full after retries, dropping snapshot");
+                            break;
+                        }
+                    }
+                    Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                        eprintln!("mbp_queue_closed, stopping ingest");
+                        return Err(anyhow::anyhow!("mbp queue disconnected"));
+                    }
+                }
             }
         } else {
             skipped_count += 1;
@@ -119,6 +165,7 @@ fn run_ingest(
     }
 
     drop(tx);
+    drop(mbp_tx);
 
     emit_metrics(
         start.elapsed(),
@@ -131,22 +178,35 @@ fn run_ingest(
         last_instrument, last_ts_ns, msg_count, skipped_count
     );
 
-    if msg_count > 0 {
-        let final_snapshot =
-            build_full_snapshot_record(&market, last_instrument, &config.symbol, last_ts_ns);
-        if let Err(e) = write_final_snapshot(&final_snapshot) {
-            eprintln!("failed to write final_result.json: {}", e);
-        }
-    }
-
     Ok(())
 }
 
-fn write_final_snapshot(snapshot: &SnapshotRecord) -> Result<()> {
-    let json = serde_json::to_string_pretty(&snapshot.payload)
-        .context("failed to serialize final snapshot to json")?;
-    fs::write("final_result.json", json).context("failed to write final_result.json")?;
-    Ok(())
+fn spawn_mbp_writer(
+    rx: crossbeam_channel::Receiver<SharedSnapshot>,
+) -> std::thread::JoinHandle<Result<()>> {
+    std::thread::spawn(move || {
+        let mbp_file =
+            fs::File::create("final_mbp.json").context("failed to create final_mbp.json")?;
+        let mut mbp_writer = BufWriter::new(mbp_file);
+        let mut written_count = 0u64;
+
+        while let Ok(snapshot) = rx.recv() {
+            let mbp = snapshot_to_mbp_output(&snapshot);
+            if let Ok(json) = serde_json::to_string(&mbp) {
+                if let Err(e) = writeln!(mbp_writer, "{}", json) {
+                    eprintln!("mbp_writer failed to write: {}", e);
+                    return Err(anyhow::anyhow!("failed to write MBP snapshot: {}", e));
+                }
+                written_count += 1;
+            }
+        }
+
+        mbp_writer
+            .flush()
+            .context("failed to flush final_mbp.json")?;
+        println!("mbp_writer finished, wrote {} snapshots", written_count);
+        Ok(())
+    })
 }
 
 fn emit_metrics(

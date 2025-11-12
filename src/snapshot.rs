@@ -148,3 +148,82 @@ fn to_level_entry(level: &PriceLevel) -> LevelEntry {
         count: level.count,
     }
 }
+
+// MBP output format structures
+#[derive(Serialize)]
+pub struct MbpLevel {
+    pub count: u32,
+    pub price: String,
+    pub size: u32,
+}
+
+#[derive(Serialize)]
+pub struct MbpBboSide {
+    pub count: u32,
+    pub price: String,
+    pub size: u32,
+}
+
+#[derive(Serialize)]
+pub struct MbpBbo {
+    pub ask: Option<MbpBboSide>,
+    pub bid: Option<MbpBboSide>,
+}
+
+#[derive(Serialize)]
+pub struct MbpLevels {
+    pub asks: Vec<MbpLevel>,
+    pub bids: Vec<MbpLevel>,
+}
+
+#[derive(Serialize)]
+pub struct MbpStats {
+    pub ask_levels: usize,
+    pub bid_levels: usize,
+    pub total_orders: usize,
+}
+
+#[derive(Serialize)]
+pub struct MbpOutput {
+    pub bbo: MbpBbo,
+    pub levels: MbpLevels,
+    pub info: MbpStats,
+    pub symbol: String,
+    pub timestamp: String,
+}
+
+fn level_to_mbp(e: &LevelEntry) -> MbpLevel {
+    MbpLevel {
+        count: e.count,
+        price: e.price.to_string(),
+        size: e.size,
+    }
+}
+
+fn level_to_mbp_bbo(e: &LevelEntry) -> MbpBboSide {
+    MbpBboSide {
+        count: e.count,
+        price: e.price.to_string(),
+        size: e.size,
+    }
+}
+
+pub fn snapshot_to_mbp_output(rec: &SnapshotRecord) -> MbpOutput {
+    MbpOutput {
+        bbo: MbpBbo {
+            ask: rec.payload.bbo.best_ask.as_ref().map(level_to_mbp_bbo),
+            bid: rec.payload.bbo.best_bid.as_ref().map(level_to_mbp_bbo),
+        },
+        levels: MbpLevels {
+            asks: rec.payload.asks.iter().map(level_to_mbp).collect(),
+            bids: rec.payload.bids.iter().map(level_to_mbp).collect(),
+        },
+        info: MbpStats {
+            ask_levels: rec.payload.ask_levels,
+            bid_levels: rec.payload.bid_levels,
+            total_orders: rec.payload.total_orders,
+        },
+        symbol: rec.payload.symbol.clone(),
+        timestamp: rec.payload.ts_ns.to_string(),
+    }
+}
