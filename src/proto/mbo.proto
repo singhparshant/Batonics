@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+message Header {
+  uint64 ts_event = 1;
+  uint32 rtype = 2;
+  uint32 publisher_id = 3;
+  uint32 instrument_id = 4;
+}
+
+message MboMsg {
+  Header hd = 1;
+  string action = 2;
+  string side = 3;
+  uint64 price = 4;
+  uint32 size = 5;
+  uint32 channel_id = 6;
+  uint64 order_id = 7;
+  uint32 flags = 8;
+  uint64 ts_in_delta = 9;
+  uint64 sequence = 10;
+}
+
+message MboBatch {
+  repeated MboMsg msgs = 1;
+}

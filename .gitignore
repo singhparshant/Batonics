@@ -1,0 +1,12 @@
+test/
+target/
+mbo.json
+CLX5_mbo.dbn
+*.dbn
+*.json
+*.csv
+.env
+.DS_Store
+.idea/
+.vscode/
+.cursor/
