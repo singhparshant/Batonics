@@ -22,4 +22,6 @@ Total Bytes: 2243649 (2.14MB)
 8. Tried to handle errors gracefully in storage and ingestion.
 
 ## Time taken:
-I would say I spent roughly 8-10 hours in total. The order book concepts were not new to me and most of the implementation was available in the documentation, so adapting it took about 2 hours. For the streaming, the logic itself was simple but I did a couple of iterations on the implementation, about 3 hours. The rest went into the database writing logic, a bit of tuning, and some small cleanups.
+I would say I spent roughly 9-10 hours in total. The order book concepts were not new to me and most of the implementation was available in the documentation, so adapting it took about 2 hours. For the streaming, the logic itself was simple but I did a couple of iterations on the implementation, about 3 hours. The rest went into the database writing logic, a bit of tuning, and some small cleanups.
+
+I have built orderbooks in the past, so the structure overall was not new, but I did spend some time on the implementation to make it more efficient and idiomatic.
