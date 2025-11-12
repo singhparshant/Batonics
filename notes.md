@@ -11,6 +11,8 @@ Total Messages: 38212
 Total Batches: 39
 Total Bytes: 2243649 (2.14MB)
 
+ I also considered zero‑copy serialization (e.g., rkyv/Cap’n Proto/FlatBuffers) but chose Protocol Buffers via prost for maturity and because i have used it before.
+
 ## Orderbook Reconstruction and Database Writing
 1. Used the dbn CLI to quickly peek at the DBN as JSON and understand message shapes.
 2. Built the order book with the dbn crate and MboMsg, most of the logic was available in the documentation, so it was easy to implement and only needed minor modifications. There were some invalid cancels which were ignored without blowing up the state.
